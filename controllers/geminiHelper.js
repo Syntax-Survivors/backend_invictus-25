@@ -17,12 +17,12 @@ async function enhanceQuery(userQuery) {
 }
 
 // Generate recommendations from paper titles
-async function explainRecommendations(titles) {
+async function explainRecommendations(titles, userInterests) {
   const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
   const prompt = `
     Analyze these research papers and suggest 3 most relevant ones for someone interested in 
-    ${userInterest}. Format as JSON: { recommendations: [ { title, reason } ] }
+    ${userInterests.join(', ')}. Format as JSON: { recommendations: [ { title, reason } ] }
     Papers: ${titles.join(", ")}
   `;
 

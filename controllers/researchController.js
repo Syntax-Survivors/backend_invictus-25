@@ -46,3 +46,30 @@ exports.getPersonalizedRecommendations = async (req, res) => {
     res.status(500).json({ error: 'Personalized recommendations failed' });
   }
 };
+
+// General recommendations (non-personalized)
+exports.getRecommendations = async (req, res) => {
+  const { query } = req.query;
+  
+  if (!query) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  try {
+    // Fetch papers based on direct query
+    const response = await axios.get(
+      'https://api.semanticscholar.org/graph/v1/paper/search',
+      {
+        params: {
+          query: query,
+          limit: 10,
+          fields: 'title,abstract,authors,year,citationCount'
+        }
+      }
+    );
+
+    res.json(response.data.data || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Paper recommendation failed' });
+  }
+};

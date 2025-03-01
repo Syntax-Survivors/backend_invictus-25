@@ -3,10 +3,19 @@ const socketIO = require('socket.io');
 const http = require('http');
 const cors = require('cors');
 require('dotenv').config();
+const apiRoutes = require('./routes/api');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, { cors: { origin: '*' } });
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// API Routes
+app.use('/api', apiRoutes);
 
 // Socket.io for real-time chat
 io.on('connection', (socket) => {
