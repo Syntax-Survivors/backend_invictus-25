@@ -4,7 +4,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Generate search optimization prompt
 async function enhanceQuery(userQuery) {
-  const model = genAI.getGenerativeModel({ model: "gemini-flash-1.5" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   
   const prompt = `
     Act as a research assistant. Optimize this raw user query for academic paper search: 
@@ -18,7 +18,7 @@ async function enhanceQuery(userQuery) {
 
 // Generate recommendations from paper titles
 async function explainRecommendations(titles, userInterests) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   const prompt = `
     Analyze these research papers and suggest 3 most relevant ones for someone interested in 
