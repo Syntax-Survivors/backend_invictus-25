@@ -7,16 +7,18 @@ const userController = require('../controllers/userController');
 const { authMiddleware } = require('../middleware/auth');
 const { db } = require('../config/firebase');
 
-// Add these new routes
+// Auth routes
+router.post('/register', authController.register);
+router.post('/signin', authController.signIn);
+
+// Protected routes
 router.put('/interests', authMiddleware, userController.updateInterests);
 router.get('/interests', authMiddleware, userController.getInterests);
 router.get('/recommendations/personalized', authMiddleware, researchController.getPersonalizedRecommendations);
 router.get('/researchers', researchController.searchResearchers);
-
-// Existing routes
-router.post('/register', authController.register);
 router.get('/recommendations', researchController.getRecommendations);
 
+// Test route
 router.get('/test-firebase', async (req, res) => {
     try {
       const docRef = db.collection('test').doc('testDoc');
