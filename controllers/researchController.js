@@ -2,74 +2,64 @@
 const axios = require('axios');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { db } = require('../config/firebase');
+const xml2js = require('xml2js');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Helper function to clean JSON response from markdown
-const cleanJsonResponse = (text) => {
-  // Remove markdown code block indicators and any surrounding whitespace
-  return text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+// Helper function to parse arXiv XML response
+const parseArxivResponse = async (xmlData) => {
+  const parser = new xml2js.Parser();
+  const result = await parser.parseStringPromise(xmlData);
+  return result.feed.entry || [];
 };
+
+// Format arXiv entry to paper object
+const formatArxivPaper = (entry) => ({
+  title: Array.isArray(entry.title) ? entry.title[0] : entry.title,
+  abstract: Array.isArray(entry.summary) ? entry.summary[0] : entry.summary,
+  authors: entry.author?.map(author => author.name?.[0] || author),
+  year: new Date(entry.published?.[0]).getFullYear(),
+  url: entry.id?.[0],
+  venue: 'arXiv',
+});
 
 // Personalized recommendations
 exports.getPersonalizedRecommendations = async (req, res) => {
   const userId = req.user.id;
 
   try {
-    console.log('Getting recommendations for user:', userId);
-    
-    // Get user interests
     const userDoc = await db.collection('users').doc(userId).get();
     
     if (!userDoc.exists) {
-      console.error('User document not found');
       return res.status(404).json({ error: 'User not found' });
     }
 
     const userData = userDoc.data();
     const interests = userData.interests || [];
-    console.log('User interests:', interests);
 
     if (interests.length === 0) {
       return res.status(400).json({ error: 'No interests found' });
     }
 
-    // Generate search query with Gemini
     try {
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }); // Changed to gemini-pro
-      const prompt = `Convert these research interests to academic paper search query: ${interests.join(', ')}. Respond ONLY with the query.`;
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const prompt = `Convert these research interests to an arXiv search query: ${interests.join(', ')}. Respond ONLY with the query.`;
       const optimizedQuery = (await model.generateContent(prompt)).response.text().trim();
-      console.log('Generated query:', optimizedQuery);
 
-      // Fetch papers with all relevant fields
+      // Fetch papers from arXiv
       const response = await axios.get(
-        'https://api.semanticscholar.org/graph/v1/paper/search',
-        {
+        `http://export.arxiv.org/api/query`, {
           params: {
-            query: optimizedQuery,
-            limit: 5,
-            fields: 'title,abstract,authors,year,citationCount,url,venue'
+            search_query: `all:${optimizedQuery}`,
+            sortBy: 'lastUpdatedDate',
+            sortOrder: 'descending',
+            max_results: 5
           }
         }
       );
 
-      const papers = response.data.data;
-      console.log('Found papers count:', papers.length);
-
-      if (!papers || papers.length === 0) {
-        return res.json({ recommendations: [] });
-      }
-
-      // Transform papers to include all fields
-      const recommendations = papers.map(paper => ({
-        title: paper.title,
-        abstract: paper.abstract || 'Abstract not available',
-        authors: paper.authors?.map(author => author.name) || [],
-        year: paper.year,
-        citationCount: paper.citationCount || 0,
-        url: paper.url || 'URL not available',
-        venue: paper.venue
-      }));
+      const entries = await parseArxivResponse(response.data);
+      const recommendations = entries.map(formatArxivPaper);
 
       res.json({ recommendations });
 
@@ -99,36 +89,29 @@ exports.getRecommendations = async (req, res) => {
   }
 
   try {
-    // Prepare request configuration
-    const requestConfig = {
-      params: {
-        query: query,
-        limit: 10,
-        fields: 'title,abstract,authors,year,citationCount,url'  // Added url field
-      }
-    };
-
-    // Only add API key header if a valid key is provided
-    if (process.env.SEMANTIC_SCHOLAR_API_KEY && process.env.SEMANTIC_SCHOLAR_API_KEY !== 'optional_key') {
-      requestConfig.headers = {
-        'x-api-key': process.env.SEMANTIC_SCHOLAR_API_KEY
-      };
-    }
-
-    // Fetch papers based on direct query
     const response = await axios.get(
-      'https://api.semanticscholar.org/graph/v1/paper/search',
-      requestConfig
+      'http://export.arxiv.org/api/query',
+      {
+        params: {
+          search_query: `all:${query}`,
+          sortBy: 'lastUpdatedDate',
+          sortOrder: 'descending',
+          max_results: 10
+        }
+      }
     );
 
-    res.json(response.data.data || []);
+    const entries = await parseArxivResponse(response.data);
+    const papers = entries.map(formatArxivPaper);
+
+    res.json(papers);
   } catch (err) {
     console.error('Paper recommendation error:', err);
     res.status(500).json({ error: 'Paper recommendation failed' });
   }
 };
 
-// Search for researchers
+// Search for researchers (using arXiv author search)
 exports.searchResearchers = async (req, res) => {
   const { query } = req.query;
   
@@ -137,47 +120,56 @@ exports.searchResearchers = async (req, res) => {
   }
 
   try {
-    // Prepare request configuration
-    const requestConfig = {
-      params: {
-        query: query,
-        limit: 10,
-        fields: 'name,affiliations,paperCount,citationCount,homepage,papers.year,papers.title'
-      }
-    };
-
-    // Add API key if available
-    if (process.env.SEMANTIC_SCHOLAR_API_KEY && process.env.SEMANTIC_SCHOLAR_API_KEY !== 'optional_key') {
-      requestConfig.headers = {
-        'x-api-key': process.env.SEMANTIC_SCHOLAR_API_KEY
-      };
-    }
-
-    // Fetch researchers based on query
+    // Search for papers by author
     const response = await axios.get(
-      'https://api.semanticscholar.org/graph/v1/author/search',
-      requestConfig
+      'http://export.arxiv.org/api/query',
+      {
+        params: {
+          search_query: `au:${query}`,
+          sortBy: 'lastUpdatedDate',
+          sortOrder: 'descending',
+          max_results: 20
+        }
+      }
     );
 
-    const researchers = response.data.data || [];
+    const entries = await parseArxivResponse(response.data);
+    
+    // Extract and deduplicate authors
+    const authorMap = new Map();
+    
+    entries.forEach(entry => {
+      const authors = entry.author || [];
+      authors.forEach(author => {
+        const name = author.name?.[0] || author;
+        if (!authorMap.has(name)) {
+          authorMap.set(name, {
+            name: name,
+            papers: [],
+            paperCount: 0
+          });
+        }
+        
+        const authorData = authorMap.get(name);
+        authorData.paperCount++;
+        if (authorData.papers.length < 5) {
+          authorData.papers.push({
+            title: Array.isArray(entry.title) ? entry.title[0] : entry.title,
+            year: new Date(entry.published?.[0]).getFullYear()
+          });
+        }
+      });
+    });
 
-    // Transform and clean up the data
-    const formattedResearchers = researchers.map(researcher => ({
-      name: researcher.name,
-      affiliations: researcher.affiliations || [],
-      paperCount: researcher.paperCount || 0,
-      citationCount: researcher.citationCount || 0,
-      homepage: researcher.homepage || null,
-      recentPapers: (researcher.papers || [])
-        .sort((a, b) => (b.year || 0) - (a.year || 0))
-        .slice(0, 5)
-        .map(paper => ({
-          title: paper.title,
-          year: paper.year
-        }))
-    }));
+    const researchers = Array.from(authorMap.values())
+      .filter(author => author.name.toLowerCase().includes(query.toLowerCase()))
+      .map(author => ({
+        name: author.name,
+        paperCount: author.paperCount,
+        recentPapers: author.papers
+      }));
 
-    res.json({ researchers: formattedResearchers });
+    res.json({ researchers });
   } catch (err) {
     console.error('Researcher search error:', err);
     res.status(500).json({ 
